@@ -40,13 +40,13 @@ class KafkaLoggerShould {
 
     @BeforeEach
     void setUp() {
-        createKafkaLogger();
+        kafkaLogger = createKafkaLogger();
     }
 
-    private void createKafkaLogger() {
+    private KafkaLogger createKafkaLogger() {
         kafkaHost = kafka.getHost();
         kafkaPort = kafka.getMappedPort(WORKING_KAFKA_BROKER_PORT);
-        kafkaLogger = new KafkaLogger(kafkaHost, kafkaPort, TOPIC_NAME);
+        return new KafkaLogger(kafkaHost, kafkaPort, TOPIC_NAME);
     }
 
     @Test
@@ -70,6 +70,15 @@ class KafkaLoggerShould {
         writeLogToKafkaIndependently();
 
         Logs logs = kafkaLogger.read();
+
+        assertThat(logs.getLogs()).containsExactly(log);
+    }
+
+    @Test
+    void shareLogsWithOtherProcesses() {
+        kafkaLogger.log(log);
+
+        Logs logs = createKafkaLogger().read();
 
         assertThat(logs.getLogs()).containsExactly(log);
     }

@@ -6,13 +6,18 @@ import com.github.muirandy.docs.yatspec.distributed.Logs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ExecutionException;
 
 public class KafkaLogger implements DiagramLogger {
+    private static final String KAFKA_SERIALIZER = "org.apache.kafka.common.serialization.StringSerializer";
     private static final String KAFKA_DESERIALIZER = "org.apache.kafka.common.serialization.StringDeserializer";
     private static final String KAFKA_CONSUMER_GROUP = "kafka-diagram-logger";
     private static final String READ_TOPIC_FROM_BEGINNING = "earliest";
@@ -31,7 +36,30 @@ public class KafkaLogger implements DiagramLogger {
 
     @Override
     public void log(Log log) {
-        logs.add(log);
+        sendMessageToKafkaTopic(log.getMessage(), log.getBody());
+    }
+
+    private void sendMessageToKafkaTopic(String key, String value) {
+        try {
+            getStringStringKafkaProducer().send(createProducerRecord(topicName, key, value)).get();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } catch (ExecutionException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private KafkaProducer<String, String> getStringStringKafkaProducer() {
+        return new KafkaProducer<>(kafkaPropertiesForProducer());
+    }
+
+    private Properties kafkaPropertiesForProducer() {
+        Properties props = new Properties();
+        props.put("acks", "all");
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getExternalBootstrapServers());
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
+        return props;
     }
 
     @Override
@@ -39,6 +67,10 @@ public class KafkaLogger implements DiagramLogger {
         ConsumerRecords<String,String> kafkaRecords = readKafkaLogs();
         kafkaRecords.forEach(kr -> logs.add(new Log(kr.key(), kr.value())));
         return logs;
+    }
+
+    private ProducerRecord createProducerRecord(String topicName, String key, String value) {
+        return new ProducerRecord(topicName, key, value);
     }
 
     private ConsumerRecords<String, String> readKafkaLogs() {

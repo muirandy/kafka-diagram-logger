@@ -4,6 +4,7 @@ import com.github.muirandy.docs.yatspec.distributed.DiagramLogger;
 import com.github.muirandy.docs.yatspec.distributed.Log;
 import com.github.muirandy.docs.yatspec.distributed.Logs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -11,6 +12,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -21,12 +23,11 @@ public class KafkaLogger implements DiagramLogger {
     private static final String KAFKA_DESERIALIZER = "org.apache.kafka.common.serialization.StringDeserializer";
     private static final String KAFKA_CONSUMER_GROUP = "kafka-diagram-logger";
     private static final String READ_TOPIC_FROM_BEGINNING = "earliest";
+    private static final String SEQUENCE_DIAGRAM_END_MARKER = "SEQUENCE_DIAGRAM_END_MARKER";
 
     private final String kafkaHost;
     private final Integer kafkaPort;
     private final String topicName;
-
-    private Logs logs = new Logs();
 
     public KafkaLogger(String kafkaHost, Integer kafkaPort, String topicName) {
         this.kafkaHost = kafkaHost;
@@ -41,7 +42,9 @@ public class KafkaLogger implements DiagramLogger {
 
     private void sendMessageToKafkaTopic(String key, String value) {
         try {
-            getStringStringKafkaProducer().send(createProducerRecord(topicName, key, value)).get();
+            KafkaProducer<String, String> kafkaProducer = getStringStringKafkaProducer();
+            kafkaProducer.send(createProducerRecord(topicName, key, value)).get();
+            kafkaProducer.flush();
         } catch (InterruptedException e) {
             e.printStackTrace();
         } catch (ExecutionException e) {
@@ -53,6 +56,10 @@ public class KafkaLogger implements DiagramLogger {
         return new KafkaProducer<>(kafkaPropertiesForProducer());
     }
 
+    private ProducerRecord createProducerRecord(String topicName, String key, String value) {
+        return new ProducerRecord(topicName, key, value);
+    }
+
     private Properties kafkaPropertiesForProducer() {
         Properties props = new Properties();
         props.put("acks", "all");
@@ -62,15 +69,16 @@ public class KafkaLogger implements DiagramLogger {
         return props;
     }
 
-    @Override
-    public Logs read() {
-        ConsumerRecords<String,String> kafkaRecords = readKafkaLogs();
-        kafkaRecords.forEach(kr -> logs.add(new Log(kr.key(), kr.value())));
-        return logs;
+    private String getExternalBootstrapServers() {
+        return kafkaHost + ":" + kafkaPort;
     }
 
-    private ProducerRecord createProducerRecord(String topicName, String key, String value) {
-        return new ProducerRecord(topicName, key, value);
+    @Override
+    public Logs read() {
+        Logs logs = new Logs();
+        ConsumerRecords<String, String> kafkaRecords = readKafkaLogs();
+        kafkaRecords.forEach(kr -> logs.add(new Log(kr.key(), kr.value())));
+        return logs;
     }
 
     private ConsumerRecords<String, String> readKafkaLogs() {
@@ -84,14 +92,55 @@ public class KafkaLogger implements DiagramLogger {
     private Properties kafkaPropertiesForConsumer() {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getExternalBootstrapServers());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, KAFKA_CONSUMER_GROUP);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, KAFKA_CONSUMER_GROUP + Integer.toHexString(this.hashCode()));
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, KAFKA_DESERIALIZER);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KAFKA_DESERIALIZER);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, READ_TOPIC_FROM_BEGINNING);
         return props;
     }
 
-    private String getExternalBootstrapServers() {
-        return kafkaHost + ":" + kafkaPort;
+    @Override
+    public void markEnd(String sequenceDiagramId) {
+        sendMessageToKafkaTopic(SEQUENCE_DIAGRAM_END_MARKER, sequenceDiagramId);
+    }
+
+    @Override
+    public Logs read(String logId) {
+        ConsumerRecords<String, String> kafkaRecords = readKafkaLogs();
+        Map<String, String> requestedLogs = findRequestedLogs(logId, kafkaRecords);
+
+        return turnMapToLogs(requestedLogs);
+    }
+
+    private Map<String, String> findRequestedLogs(String logId, ConsumerRecords<String, String> consumerRecords) {
+        Map<String, String> requestedLogs = new LinkedHashMap<>();
+
+        for (ConsumerRecord<String,String> consumerRecord : consumerRecords) {
+            String k = consumerRecord.key();
+            String v = consumerRecord.value();
+
+            if (isEndMarker(k)) {
+                if (isRequestedEndMarker(v, logId))
+                    return requestedLogs;
+                requestedLogs = new LinkedHashMap<>();
+            } else
+                requestedLogs.put(k, v);
+        }
+
+        return requestedLogs;
+    }
+
+    private Logs turnMapToLogs(Map<String, String> requestedLogs) {
+        Logs logs = new Logs();
+        requestedLogs.forEach((k, v) -> logs.add(new Log(k, v)));
+        return logs;
+    }
+
+    private boolean isEndMarker(String k) {
+        return (k.equals(SEQUENCE_DIAGRAM_END_MARKER));
+    }
+
+    private boolean isRequestedEndMarker(String v, String logId) {
+        return v.equals(logId);
     }
 }

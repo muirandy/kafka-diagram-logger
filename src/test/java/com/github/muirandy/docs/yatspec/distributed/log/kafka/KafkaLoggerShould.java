@@ -14,6 +14,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,7 +25,9 @@ class KafkaLoggerShould {
     private static final String KAFKA_SERIALIZER = "org.apache.kafka.common.serialization.StringSerializer";
     private static final String TOPIC_NAME = "living-documentation";
     private static final String LOG_MESSAGE = "Message";
+    private static final String SECOND_LOG_MESSAGE = "Second Message";
     private static final String BODY = "Body";
+    private static final String SECOND_BODY = "Second Body";
     private static final int WORKING_KAFKA_BROKER_PORT = 9093;
 
 
@@ -35,8 +38,10 @@ class KafkaLoggerShould {
 
     DiagramLogger kafkaLogger;
     private Log log = new Log(LOG_MESSAGE, BODY);
+    private Log secondLog = new Log(SECOND_LOG_MESSAGE, SECOND_BODY);
     private String kafkaHost;
     private Integer kafkaPort;
+    private String logId = UUID.randomUUID().toString();
 
     @BeforeEach
     void setUp() {
@@ -81,6 +86,37 @@ class KafkaLoggerShould {
         Logs logs = createKafkaLogger().read();
 
         assertThat(logs.getLogs()).containsExactly(log);
+    }
+
+    @Test
+    void retrieveEmptyLogsForGivenId() {
+        kafkaLogger.markEnd(logId);
+
+        Logs logs = kafkaLogger.read(logId);
+
+        assertThat(logs.getLogs()).isEmpty();
+    }
+
+    @Test
+    void retrieveSingleLogForGivenId() {
+        kafkaLogger.log(log);
+        kafkaLogger.markEnd(logId);
+
+        Logs logs = kafkaLogger.read(logId);
+
+        assertThat(logs.getLogs()).containsExactly(log);
+    }
+
+    @Test
+    void excludePriorLogs() {
+        kafkaLogger.log(log);
+        kafkaLogger.markEnd("Previous Id");
+        kafkaLogger.log(secondLog);
+        kafkaLogger.markEnd(logId);
+
+        Logs logs = kafkaLogger.read(logId);
+
+        assertThat(logs.getLogs()).containsExactly(secondLog);
     }
 
     private void writeLogToKafkaIndependently() {

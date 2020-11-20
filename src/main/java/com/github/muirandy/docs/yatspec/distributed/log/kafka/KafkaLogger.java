@@ -22,6 +22,7 @@ public class KafkaLogger implements DiagramLogger {
     private static final String KAFKA_CONSUMER_GROUP = "kafka-diagram-logger";
     private static final String READ_TOPIC_FROM_BEGINNING = "earliest";
     private static final String SEQUENCE_DIAGRAM_END_MARKER = "SEQUENCE_DIAGRAM_END_MARKER";
+    private static final String DEFAULT_KAFKA_TOPIC = "living-documentation";
 
     private final String kafkaHost;
     private final Integer kafkaPort;
@@ -35,6 +36,10 @@ public class KafkaLogger implements DiagramLogger {
         this.topicName = topicName;
 
         createKafkaConsumer(topicName);
+    }
+
+    public KafkaLogger(String kafkaHost, Integer kafkaPort) {
+        this(kafkaHost, kafkaPort, DEFAULT_KAFKA_TOPIC);
     }
 
     private void createKafkaConsumer(String topicName) {

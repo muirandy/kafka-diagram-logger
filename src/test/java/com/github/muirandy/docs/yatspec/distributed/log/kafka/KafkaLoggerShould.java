@@ -156,4 +156,21 @@ class KafkaLoggerShould {
 
         assertThat(logs.getLogs()).containsExactly(secondLog);
     }
+
+    @Test
+    void defaultTopic() {
+        kafkaLogger = createKafkaLoggerOnDefaultTopic();
+        kafkaLogger.log(log);
+
+        Logs logs = kafkaLogger.read();
+
+        assertThat(logs.getLogs()).containsExactly(log);
+
+    }
+
+    private DiagramLogger createKafkaLoggerOnDefaultTopic() {
+        kafkaHost = KAFKA.getHost();
+        kafkaPort = KAFKA.getMappedPort(WORKING_KAFKA_BROKER_PORT);
+        return new KafkaLogger(kafkaHost, kafkaPort);
+    }
 }

@@ -9,6 +9,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -23,20 +24,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 class KafkaLoggerShould {
 
     private static final String KAFKA_SERIALIZER = "org.apache.kafka.common.serialization.StringSerializer";
-    private static final String TOPIC_NAME = "living-documentation";
     private static final String LOG_MESSAGE = "Message";
     private static final String SECOND_LOG_MESSAGE = "Second Message";
     private static final String BODY = "Body";
     private static final String SECOND_BODY = "Second Body";
     private static final int WORKING_KAFKA_BROKER_PORT = 9093;
 
+    private String topicName = "living-documentation-" + UUID.randomUUID().toString();
 
     @Container
-    private final KafkaContainer kafka =
+    private static final KafkaContainer KAFKA =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:5.4.3"))
-                ;
+                                .waitingFor(
+                                        Wait.forLogMessage(".*Successfully submitted metrics to Confluent via secure endpoint.*", 1)
+                                );
 
-    DiagramLogger kafkaLogger;
+    private DiagramLogger kafkaLogger;
     private Log log = new Log(LOG_MESSAGE, BODY);
     private Log secondLog = new Log(SECOND_LOG_MESSAGE, SECOND_BODY);
     private String kafkaHost;
@@ -49,9 +52,9 @@ class KafkaLoggerShould {
     }
 
     private KafkaLogger createKafkaLogger() {
-        kafkaHost = kafka.getHost();
-        kafkaPort = kafka.getMappedPort(WORKING_KAFKA_BROKER_PORT);
-        return new KafkaLogger(kafkaHost, kafkaPort, TOPIC_NAME);
+        kafkaHost = KAFKA.getHost();
+        kafkaPort = KAFKA.getMappedPort(WORKING_KAFKA_BROKER_PORT);
+        return new KafkaLogger(kafkaHost, kafkaPort, topicName);
     }
 
     @Test
@@ -77,6 +80,41 @@ class KafkaLoggerShould {
         Logs logs = kafkaLogger.read();
 
         assertThat(logs.getLogs()).containsExactly(log);
+    }
+
+    private void writeLogToKafkaIndependently() {
+        sendMessageToKafkaTopic(log.getMessage(), log.getBody());
+    }
+
+    private void sendMessageToKafkaTopic(String key, String value) {
+        try {
+            getStringStringKafkaProducer().send(createProducerRecord(topicName, key, value)).get();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } catch (ExecutionException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private KafkaProducer<String, String> getStringStringKafkaProducer() {
+        return new KafkaProducer<>(kafkaPropertiesForProducer());
+    }
+
+    private ProducerRecord createProducerRecord(String topicName, String key, String value) {
+        return new ProducerRecord(topicName, key, value);
+    }
+
+    private Properties kafkaPropertiesForProducer() {
+        Properties props = new Properties();
+        props.put("acks", "all");
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getExternalBootstrapServers());
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
+        return props;
+    }
+
+    private String getExternalBootstrapServers() {
+        return "localhost:" + kafkaPort;
     }
 
     @Test
@@ -118,40 +156,4 @@ class KafkaLoggerShould {
 
         assertThat(logs.getLogs()).containsExactly(secondLog);
     }
-
-    private void writeLogToKafkaIndependently() {
-        sendMessageToKafkaTopic(log.getMessage(), log.getBody());
-    }
-
-    private void sendMessageToKafkaTopic(String key, String value) {
-        try {
-            getStringStringKafkaProducer().send(createProducerRecord(TOPIC_NAME, key, value)).get();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        } catch (ExecutionException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private KafkaProducer<String, String> getStringStringKafkaProducer() {
-        return new KafkaProducer<>(kafkaPropertiesForProducer());
-    }
-
-    private Properties kafkaPropertiesForProducer() {
-        Properties props = new Properties();
-        props.put("acks", "all");
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getExternalBootstrapServers());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
-        return props;
-    }
-
-    private String getExternalBootstrapServers() {
-        return "localhost:" + kafkaPort;
-    }
-
-    private ProducerRecord createProducerRecord(String topicName, String key, String value) {
-        return new ProducerRecord(topicName, key, value);
-    }
-
 }

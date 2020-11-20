@@ -12,9 +12,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 
@@ -29,10 +27,19 @@ public class KafkaLogger implements DiagramLogger {
     private final Integer kafkaPort;
     private final String topicName;
 
+    private KafkaConsumer<String, String> consumer;
+
     public KafkaLogger(String kafkaHost, Integer kafkaPort, String topicName) {
         this.kafkaHost = kafkaHost;
         this.kafkaPort = kafkaPort;
         this.topicName = topicName;
+
+        createKafkaConsumer(topicName);
+    }
+
+    private void createKafkaConsumer(String topicName) {
+        consumer = new KafkaConsumer<>(kafkaPropertiesForConsumer());
+        consumer.subscribe(List.of(topicName));
     }
 
     @Override
@@ -63,14 +70,10 @@ public class KafkaLogger implements DiagramLogger {
     private Properties kafkaPropertiesForProducer() {
         Properties props = new Properties();
         props.put("acks", "all");
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getExternalBootstrapServers());
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KAFKA_SERIALIZER);
         return props;
-    }
-
-    private String getExternalBootstrapServers() {
-        return kafkaHost + ":" + kafkaPort;
     }
 
     @Override
@@ -82,21 +85,21 @@ public class KafkaLogger implements DiagramLogger {
     }
 
     private ConsumerRecords<String, String> readKafkaLogs() {
-        KafkaConsumer<String, String> consumer = new KafkaConsumer
-                <>(kafkaPropertiesForConsumer());
-        consumer.subscribe(List.of(topicName));
-
-        return consumer.poll(Duration.ofMillis(500));
+        return consumer.poll(Duration.ofMillis(1000));
     }
 
     private Properties kafkaPropertiesForConsumer() {
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getExternalBootstrapServers());
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, KAFKA_CONSUMER_GROUP + Integer.toHexString(this.hashCode()));
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, KAFKA_DESERIALIZER);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KAFKA_DESERIALIZER);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, READ_TOPIC_FROM_BEGINNING);
         return props;
+    }
+
+    private String getBootstrapServers() {
+        return kafkaHost + ":" + kafkaPort;
     }
 
     @Override
@@ -107,14 +110,11 @@ public class KafkaLogger implements DiagramLogger {
     @Override
     public Logs read(String logId) {
         ConsumerRecords<String, String> kafkaRecords = readKafkaLogs();
-        Map<String, String> requestedLogs = findRequestedLogs(logId, kafkaRecords);
-
-        return turnMapToLogs(requestedLogs);
+        return findRequestedLogs(logId, kafkaRecords);
     }
 
-    private Map<String, String> findRequestedLogs(String logId, ConsumerRecords<String, String> consumerRecords) {
-        Map<String, String> requestedLogs = new LinkedHashMap<>();
-
+    private Logs findRequestedLogs(String logId, ConsumerRecords<String, String> consumerRecords) {
+        Logs requestedLogs = new Logs();
         for (ConsumerRecord<String,String> consumerRecord : consumerRecords) {
             String k = consumerRecord.key();
             String v = consumerRecord.value();
@@ -122,18 +122,12 @@ public class KafkaLogger implements DiagramLogger {
             if (isEndMarker(k)) {
                 if (isRequestedEndMarker(v, logId))
                     return requestedLogs;
-                requestedLogs = new LinkedHashMap<>();
+                requestedLogs = new Logs();
             } else
-                requestedLogs.put(k, v);
+                requestedLogs.add(new Log(k, v));
         }
 
         return requestedLogs;
-    }
-
-    private Logs turnMapToLogs(Map<String, String> requestedLogs) {
-        Logs logs = new Logs();
-        requestedLogs.forEach((k, v) -> logs.add(new Log(k, v)));
-        return logs;
     }
 
     private boolean isEndMarker(String k) {

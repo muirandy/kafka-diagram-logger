@@ -1,8 +1,8 @@
 package com.github.muirandy.docs.yatspec.distributed.log.kafka;
 
-import com.github.muirandy.docs.yatspec.distributed.DiagramLogger;
-import com.github.muirandy.docs.yatspec.distributed.Log;
-import com.github.muirandy.docs.yatspec.distributed.Logs;
+import com.github.muirandy.docs.living.api.DiagramLogger;
+import com.github.muirandy.docs.living.api.Log;
+import com.github.muirandy.docs.living.api.Logs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;

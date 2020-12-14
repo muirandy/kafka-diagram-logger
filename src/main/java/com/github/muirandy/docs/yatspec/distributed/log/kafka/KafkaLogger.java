@@ -29,20 +29,19 @@ public class KafkaLogger implements DiagramLogger {
     private final String topicName;
 
     private KafkaConsumer<String, String> consumer;
+    private KafkaProducer<String, String> kafkaProducer;
 
     public KafkaLogger(String kafkaHost, Integer kafkaPort, String topicName) {
         this.kafkaHost = kafkaHost;
         this.kafkaPort = kafkaPort;
         this.topicName = topicName;
-
-        createKafkaConsumer(topicName);
     }
 
     public KafkaLogger(String kafkaHost, Integer kafkaPort) {
         this(kafkaHost, kafkaPort, DEFAULT_KAFKA_TOPIC);
     }
 
-    private void createKafkaConsumer(String topicName) {
+    private void createKafkaConsumer() {
         consumer = new KafkaConsumer<>(kafkaPropertiesForConsumer());
         consumer.subscribe(List.of(topicName));
     }
@@ -54,7 +53,7 @@ public class KafkaLogger implements DiagramLogger {
 
     private void sendMessageToKafkaTopic(String key, String value) {
         try {
-            KafkaProducer<String, String> kafkaProducer = getStringStringKafkaProducer();
+            KafkaProducer<String, String> kafkaProducer = getKafkaProducer();
             kafkaProducer.send(createProducerRecord(topicName, key, value)).get();
             kafkaProducer.flush();
         } catch (InterruptedException e) {
@@ -64,8 +63,10 @@ public class KafkaLogger implements DiagramLogger {
         }
     }
 
-    private KafkaProducer<String, String> getStringStringKafkaProducer() {
-        return new KafkaProducer<>(kafkaPropertiesForProducer());
+    private KafkaProducer<String, String> getKafkaProducer() {
+        if (null == kafkaProducer)
+            kafkaProducer = new KafkaProducer<>(kafkaPropertiesForProducer());
+        return kafkaProducer;
     }
 
     private ProducerRecord createProducerRecord(String topicName, String key, String value) {
@@ -90,7 +91,13 @@ public class KafkaLogger implements DiagramLogger {
     }
 
     private ConsumerRecords<String, String> readKafkaLogs() {
-        return consumer.poll(Duration.ofMillis(1000));
+        return getConsumer().poll(Duration.ofMillis(1000));
+    }
+
+    private KafkaConsumer<String, String> getConsumer() {
+        if (consumer == null)
+            createKafkaConsumer();
+        return consumer;
     }
 
     private Properties kafkaPropertiesForConsumer() {

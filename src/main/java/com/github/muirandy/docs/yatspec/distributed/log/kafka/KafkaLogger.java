@@ -31,19 +31,14 @@ public class KafkaLogger implements DiagramLogger {
     private KafkaConsumer<String, String> consumer;
     private KafkaProducer<String, String> kafkaProducer;
 
-    public KafkaLogger(String kafkaHost, Integer kafkaPort, String topicName) {
-        this.kafkaHost = kafkaHost;
-        this.kafkaPort = kafkaPort;
-        this.topicName = topicName;
-    }
-
     public KafkaLogger(String kafkaHost, Integer kafkaPort) {
         this(kafkaHost, kafkaPort, DEFAULT_KAFKA_TOPIC);
     }
 
-    private void createKafkaConsumer() {
-        consumer = new KafkaConsumer<>(kafkaPropertiesForConsumer());
-        consumer.subscribe(List.of(topicName));
+    public KafkaLogger(String kafkaHost, Integer kafkaPort, String topicName) {
+        this.kafkaHost = kafkaHost;
+        this.kafkaPort = kafkaPort;
+        this.topicName = topicName;
     }
 
     @Override
@@ -82,22 +77,36 @@ public class KafkaLogger implements DiagramLogger {
         return props;
     }
 
+    private String getBootstrapServers() {
+        return kafkaHost + ":" + kafkaPort;
+    }
+
     @Override
     public Logs read() {
         Logs logs = new Logs();
-        ConsumerRecords<String, String> kafkaRecords = readKafkaLogs();
-        kafkaRecords.forEach(kr -> logs.add(new Log(kr.key(), kr.value())));
+        boolean keepReading = true;
+        while (keepReading) {
+            ConsumerRecords<String, String> kafkaRecords = readKafkaLogs();
+            kafkaRecords.forEach(kr -> logs.add(new Log(kr.key(), kr.value())));
+            if (kafkaRecords.isEmpty())
+                keepReading = false;
+        }
         return logs;
     }
 
     private ConsumerRecords<String, String> readKafkaLogs() {
-        return getConsumer().poll(Duration.ofMillis(1000));
+        return getConsumer().poll(Duration.ofMillis(100));
     }
 
     private KafkaConsumer<String, String> getConsumer() {
         if (consumer == null)
             createKafkaConsumer();
         return consumer;
+    }
+
+    private void createKafkaConsumer() {
+        consumer = new KafkaConsumer<>(kafkaPropertiesForConsumer());
+        consumer.subscribe(List.of(topicName));
     }
 
     private Properties kafkaPropertiesForConsumer() {
@@ -110,10 +119,6 @@ public class KafkaLogger implements DiagramLogger {
         return props;
     }
 
-    private String getBootstrapServers() {
-        return kafkaHost + ":" + kafkaPort;
-    }
-
     @Override
     public void markEnd(String sequenceDiagramId) {
         sendMessageToKafkaTopic(SEQUENCE_DIAGRAM_END_MARKER, sequenceDiagramId);
@@ -121,24 +126,29 @@ public class KafkaLogger implements DiagramLogger {
 
     @Override
     public Logs read(String logId) {
-        ConsumerRecords<String, String> kafkaRecords = readKafkaLogs();
-        return findRequestedLogs(logId, kafkaRecords);
+
+        return findRequestedLogs(logId);
     }
 
-    private Logs findRequestedLogs(String logId, ConsumerRecords<String, String> consumerRecords) {
+    private Logs findRequestedLogs(String logId) {
+        boolean keepReading = true;
         Logs requestedLogs = new Logs();
-        for (ConsumerRecord<String,String> consumerRecord : consumerRecords) {
-            String k = consumerRecord.key();
-            String v = consumerRecord.value();
+        while (keepReading) {
 
-            if (isEndMarker(k)) {
-                if (isRequestedEndMarker(v, logId))
-                    return requestedLogs;
-                requestedLogs = new Logs();
-            } else
-                requestedLogs.add(new Log(k, v));
+            ConsumerRecords<String, String> consumerRecords = readKafkaLogs();
+
+            for (ConsumerRecord<String, String> consumerRecord : consumerRecords) {
+                String k = consumerRecord.key();
+                String v = consumerRecord.value();
+
+                if (isEndMarker(k)) {
+                    if (isRequestedEndMarker(v, logId))
+                        return requestedLogs;
+                    requestedLogs = new Logs();
+                } else
+                    requestedLogs.add(new Log(k, v));
+            }
         }
-
         return requestedLogs;
     }
 
